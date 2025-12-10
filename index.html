@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班級資料篩選器</title>
+    <!-- 載入 Tailwind CSS 函式庫 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Papa Parse 函式庫，用於可靠地解析 CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        /* 使用 Inter 字體 */
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        /* 讓表格隔行換色更明顯 */
+        .data-table tr:nth-child(even) { background-color: #f9fafb; }
+        .data-table th { background-color: #1e3a8a; color: white; }
+        /* Modal 遮罩層 */
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="app" class="max-w-4xl mx-auto bg-white p-6 md:p-8 rounded-xl shadow-2xl">
+        <h1 class="text-3xl font-extrabold text-blue-800 mb-6 border-b-4 border-blue-200 pb-2">
+            互動式班級資料篩選與統計
+        </h1>
+
+        <!-- 選擇班級區域 -->
+        <div class="mb-8 p-4 bg-blue-50 rounded-lg shadow-inner">
+            <label for="class-select" class="block text-lg font-semibold text-blue-700 mb-2">
+                步驟 1: 選擇您想檢視的班級
+            </label>
+            <select id="class-select" class="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out bg-white" disabled>
+                <option value="">請稍候，正在載入資料...</option>
+            </select>
+        </div>
+
+        <!-- 時間篩選區域 -->
+        <div class="mb-8 p-4 bg-gray-50 rounded-lg shadow-inner border border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-700 mb-3">步驟 1.5: 依時間範圍篩選 (選用)</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <!-- 起日 -->
+                <div>
+                    <label for="start-date" class="block text-sm font-medium text-gray-600 mb-1">起始日期 (起日)</label>
+                    <input type="date" id="start-date" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" disabled>
+                </div>
+                <!-- 迄日 -->
+                <div>
+                    <label for="end-date" class="block text-sm font-medium text-gray-600 mb-1">結束日期 (迄日)</label>
+                    <input type="date" id="end-date" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" disabled>
+                </div>
+                <!-- 篩選按鈕與記住我 -->
+                <div class="flex flex-col space-y-2">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="remember-dates" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                        <label for="remember-dates" class="ml-2 block text-sm text-gray-900">記住我的起迄日期</label>
+                    </div>
+                    <button id="apply-filter-button" 
+                            class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out disabled:opacity-50" 
+                            disabled>
+                        依起迄日期顯示
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 資料呈現區域 -->
+        <div id="data-display-container">
+            
+            <!-- 統計數據區域 (步驟 2) -->
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-2xl font-bold text-indigo-700">
+                    步驟 2: 學生加扣分總計 (依座號排序)
+                </h2>
+                <!-- 新增按鈕 -->
+                <button id="show-full-class-button"
+                        class="bg-pink-600 hover:bg-pink-700 text-white text-sm font-semibold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out disabled:opacity-50" 
+                        disabled>
+                    顯示全班(含0分)
+                </button>
+            </div>
+
+            <div id="summary-table-container" class="mt-4 overflow-x-auto mb-8">
+                <!-- Summary table will be inserted here -->
+            </div>
+
+            <!-- 詳細資料列表 (步驟 3) -->
+            <h2 class="text-2xl font-bold text-gray-700 mb-4 pt-6 border-t-2 border-gray-200">
+                步驟 3: 原始資料列表 (詳細記錄)
+            </h2>
+             <div id="status-message" class="text-center p-4 bg-yellow-100 text-yellow-800 rounded-lg shadow">
+                請從上方下拉式選單選擇一個班級以顯示資料。
+            </div>
+            <!-- 表格將動態生成在此 -->
+            <div id="data-table-container" class="mt-4 overflow-x-auto">
+                <!-- Data table will be inserted here -->
+            </div>
+        </div>
+
+        <!-- 錯誤或載入指示器 -->
+        <div id="error-message" class="hidden mt-4 p-4 bg-red-100 text-red-800 rounded-lg shadow-md font-medium">
+            <!-- 錯誤訊息將在此顯示 -->
+        </div>
+
+    </div>
+    
+    <!-- 全班統計模態視窗 (Modal) 結構 -->
+    <div id="full-class-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-overlay transition-opacity duration-300">
+        <div class="bg-white rounded-xl shadow-3xl p-6 w-11/12 md:w-3/4 max-h-[90vh] overflow-y-auto transform transition-all duration-300 scale-95 opacity-0" id="modal-content">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 class="text-xl font-bold text-indigo-700" id="modal-title">全班統計 (含缺號補 0 分)</h3>
+                <button onclick="closeFullClassModal()" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <div id="full-class-table-container" class="overflow-x-auto">
+                <!-- Full class table will be generated here -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="notification-box" class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-xl hidden transition-opacity duration-300">
+        資料已複製到剪貼簿！
+    </div>
+
+    <script>
+        // 設定您的 Google 試算表 CSV 發佈連結
+        // 注意：請確保此連結可公開存取且允許 CORS 請求。
+        const BASE_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRZEP0OiJ9tiinNvP3HRjeZW4rSCZjQDHr4DMJ9tvMSrLaEUASk_VvBJOtAFQ9ptsmOSorkCSQSHqY1/pub?gid=678955436&single=true&output=csv";
+        const CSV_URL = `${BASE_CSV_URL}&_t=${Date.now()}`; // 加上時間戳記以減少快取問題
+
+        // 資料欄位索引定義 (從 0 開始計算)
+        const DATE_COLUMN_INDEX = 1;    // 第二個欄位為日期/時間 (已設定為要被移除/隱藏)
+        const CLASS_COLUMN_INDEX = 3;   // 第四個欄位為班級名稱 (篩選用)
+        const SEAT_NUMBER_INDEX = 4;    // 第五個欄位為座號 (排序與彙總用)
+        const NAME_INDEX = 5;           // 第六個欄位為姓名
+        const SCORE_COLUMN_INDEX = 6;   // 第七個欄位為加扣分 (計算用)
+        
+        // 要從詳細資料表格中移除的欄位索引，這裡明確移除了時間戳記欄位
+        const COLUMNS_TO_SKIP = [DATE_COLUMN_INDEX]; 
+
+        // DOM 元素
+        const classSelect = document.getElementById('class-select');
+        const startDateInput = document.getElementById('start-date');
+        const endDateInput = document.getElementById('end-date');
+        const rememberDatesCheckbox = document.getElementById('remember-dates');
+        const applyFilterButton = document.getElementById('apply-filter-button');
+        const showFullClassButton = document.getElementById('show-full-class-button');
+        const dataTableContainer = document.getElementById('data-table-container');
+        const summaryTableContainer = document.getElementById('summary-table-container'); 
+        const statusMessage = document.getElementById('status-message');
+        const errorMessage = document.getElementById('error-message');
+        const fullClassModal = document.getElementById('full-class-modal');
+        const modalContent = document.getElementById('modal-content');
+        const fullClassTableContainer = document.getElementById('full-class-table-container');
+
+        let rawData = []; // 儲存原始解析後的資料 (包含標題列)
+        let headers = []; // 儲存標題列
+        let defaultMinDate = null; // 全域最早日期
+        let defaultMaxDate = null; // 全域最晚日期
+        
+        // 儲存當前篩選結果，供 "顯示全班" 功能使用
+        let currentClassSummary = []; 
+        let currentClassMaxSeat = 0;
+        let currentSelectedClass = '';
+
+        // Helper: 將日期字串格式化為 YYYY-MM-DD (適用於 <input type="date">)
+        function formatDateToYYYYMMDD(dateString) {
+            try {
+                // 嘗試匹配 YYYY/M/D 或 YYYY-M-D 格式，並確保月/日有兩位數
+                const parts = dateString.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+                if (parts) {
+                    // parts[1]=年, parts[2]=月, parts[3]=日
+                    return `${parts[1]}-${String(parts[2]).padStart(2, '0')}-${String(parts[3]).padStart(2, '0')}`;
+                }
+                
+                // 作為備用，嘗試讓 Date 物件自行解析 (較不推薦)
+                const date = new Date(dateString);
+                if (!isNaN(date.getTime())) {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                }
+                
+                return null;
+            } catch (e) {
+                console.error("Date formatting error:", e, dateString);
+                return null;
+            }
+        }
+
+        /**
+         * 顯示錯誤訊息
+         * @param {string} message - 錯誤訊息內容
+         */
+        function displayError(message) {
+            errorMessage.textContent = `載入或解析資料時發生錯誤：${message}`;
+            errorMessage.classList.remove('hidden');
+            classSelect.innerHTML = '<option value="">載入失敗</option>';
+        }
+        
+        /**
+         * 找出 CSV 資料中的最早和最晚日期，並設定預設值
+         */
+        function getMinMaxDates() {
+            const dateStrings = rawData.slice(1) // 跳過標題
+                .map(row => row[DATE_COLUMN_INDEX])
+                .filter(date => date); 
+
+            if (dateStrings.length === 0) return;
+
+            let minDateObj = null;
+            let maxDateObj = null;
+
+            dateStrings.forEach(dateStr => {
+                const formattedDateStr = formatDateToYYYYMMDD(dateStr);
+                if (!formattedDateStr) return; 
+
+                // 使用標準格式創建 Date 物件 (T00:00:00 確保時間一致性)
+                const dateObj = new Date(formattedDateStr + 'T00:00:00');
+                if (isNaN(dateObj.getTime())) {
+                    return; 
+                }
+
+                if (!minDateObj || dateObj < minDateObj) {
+                    minDateObj = dateObj;
+                }
+                if (!maxDateObj || dateObj > maxDateObj) {
+                    maxDateObj = dateObj;
+                }
+            });
+
+            if (minDateObj && maxDateObj) {
+                // 將 Date 物件轉換回 YYYY-MM-DD 格式以設定 input value
+                defaultMinDate = formatDateToYYYYMMDD(minDateObj.toISOString());
+                defaultMaxDate = formatDateToYYYYMMDD(maxDateObj.toISOString());
+
+                // 只有在沒有勾選「記住我」時，才設定預設值
+                if (!rememberDatesCheckbox.checked) {
+                    startDateInput.value = defaultMinDate;
+                    endDateInput.value = defaultMaxDate;
+                }
+            }
+        }
+
+        /**
+         * 實現帶有指數退避的 fetch 函式，處理網路暫時性錯誤
+         * @param {string} url - 請求 URL
+         * @param {number} maxRetries - 最大重試次數
+         * @returns {Promise<string>} - 成功時返回 CSV 文本
+         */
+        async function fetchWithRetry(url, maxRetries = 3) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    // 嘗試 fetch
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const text = await response.text();
+                    return text; // 成功返回
+                } catch (error) {
+                    // console.warn(`Fetch attempt ${i + 1} failed:`, error.message); 
+                    if (i === maxRetries - 1) {
+                        // 最後一次嘗試失敗，拋出錯誤
+                        throw new Error("Final network attempt failed. Check the URL and network connection.");
+                    }
+                    // 指數退避等待
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    // console.log(`Retrying in ${delay.toFixed(0)}ms...`); 
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+
+        /**
+         * 讀取並解析 CSV 資料
+         */
+        async function loadCsvData() {
+            try {
+                // 1. 使用帶有重試機制的 fetch 獲取 CSV 文本
+                const csvText = await fetchWithRetry(CSV_URL);
+
+                // 2. 使用 Papa Parse 同步解析文本
+                Papa.parse(csvText, {
+                    download: false, // 由於我們已經手動下載，這裡設為 false
+                    header: false,  
+                    skipEmptyLines: true, 
+                    complete: function(results) {
+                        if (results.errors.length > 0) {
+                            console.error('Papa Parse Errors:', results.errors);
+                            displayError('CSV 文本解析錯誤，請檢查資料格式。');
+                            return;
+                        }
+
+                        if (results.data.length === 0) {
+                            displayError('CSV 資料為空。');
+                            return;
+                        }
+
+                        rawData = results.data;
+                        headers = rawData[0]; 
+                        
+                        // 1. 取得最小/最大日期並設定預設值
+                        getMinMaxDates();
+                        
+                        // 2. 填充班級選單
+                        const classNames = rawData
+                            .slice(1) 
+                            .map(row => row[CLASS_COLUMN_INDEX])
+                            .filter(name => name); 
+
+                        const uniqueClasses = [...new Set(classNames)].sort();
+                        populateClassSelect(uniqueClasses);
+                        
+                        // 3. 啟用控制項
+                        classSelect.disabled = false;
+                        startDateInput.disabled = false;
+                        endDateInput.disabled = false;
+                        applyFilterButton.disabled = false;
+                        
+                        // 4. 自動選擇第一個班級並顯示資料
+                        if (uniqueClasses.length > 0) {
+                            const defaultClass = uniqueClasses[0];
+                            classSelect.value = defaultClass;
+                            currentSelectedClass = defaultClass; // 設定當前選中班級
+                            
+                            const startDate = startDateInput.value;
+                            const endDate = endDateInput.value;
+
+                            // 立即篩選並顯示結果
+                            filterAndDisplayData(defaultClass, startDate, endDate);
+                            statusMessage.textContent = `資料載入完成。已自動顯示班級 "${defaultClass}" 在 ${startDate} 至 ${endDate} 期間的統計。`;
+                        } else {
+                            statusMessage.textContent = '資料載入完成。請選擇一個班級或設定日期範圍。';
+                        }
+                    },
+                    error: function(error, file) {
+                         // 這個 error 處理器在 download:false 時通常不會被觸發
+                         console.error('Papa Parse Execution Error:', error, file);
+                         displayError(`解析執行期間發生錯誤。`);
+                    }
+                });
+            } catch (error) {
+                 // 處理 fetchWithRetry 拋出的錯誤
+                 console.error('Critical Data Loading Error:', error);
+                 displayError(`無法載入資料 (網路/CORS 問題)。請確認您的 Google Sheets 連結是公開的 CSV 檔案，並且網路連線穩定。`);
+            }
+        }
+
+        /**
+         * 填充班級下拉式選單
+         */
+        function populateClassSelect(classes) {
+            classSelect.innerHTML = ''; 
+
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = '--- 請選擇一個班級 ---';
+            classSelect.appendChild(defaultOption);
+
+            classes.forEach(className => {
+                const option = document.createElement('option');
+                option.value = className;
+                option.textContent = className;
+                classSelect.appendChild(option);
+            });
+        }
+
+        /**
+         * 依學生 (座號) 彙總加扣分分數並計算最大座號
+         */
+        function calculateScoreSummary(data) {
+            const studentScores = new Map(); // Key: Seat Number (座號)
+            let maxSeat = 0;
+
+            data.forEach(row => {
+                if (row.length <= SCORE_COLUMN_INDEX) {
+                    return;
+                }
+                
+                const seat = row[SEAT_NUMBER_INDEX];
+                const name = row[NAME_INDEX];
+                const scoreString = row[SCORE_COLUMN_INDEX] ? String(row[SCORE_COLUMN_INDEX]).trim() : '0';
+                let score = 0;
+
+                score = parseFloat(scoreString);
+
+                if (isNaN(score)) {
+                    score = 0;
+                }
+                
+                // 取得座號的數字值
+                const seatNum = parseInt(seat, 10);
+                if (!isNaN(seatNum) && seatNum > maxSeat) {
+                    maxSeat = seatNum;
+                }
+
+
+                if (seat && name) { 
+                    if (!studentScores.has(seat)) {
+                        studentScores.set(seat, { 
+                            seat: seat, 
+                            name: name, 
+                            totalScore: 0,
+                            scoreEvents: [] 
+                        });
+                    }
+                    
+                    const student = studentScores.get(seat);
+                    student.totalScore += score;
+                    if (score !== 0) { 
+                         student.scoreEvents.push(score); 
+                    }
+                }
+            });
+
+            const summaryArray = Array.from(studentScores.values());
+            
+            // 排序邏輯：嘗試將座號解析為數字進行排序
+            summaryArray.sort((a, b) => {
+                const seatA = parseInt(a.seat, 10);
+                const seatB = parseInt(b.seat, 10);
+                
+                if (!isNaN(seatA) && !isNaN(seatB)) {
+                    return seatA - seatB; 
+                } else {
+                    return a.seat.localeCompare(b.seat, 'zh-TW'); 
+                }
+            });
+
+            return { summaryArray, maxSeat };
+        }
+
+        /**
+         * 生成並顯示統計總分表格 (主畫面)
+         */
+        function generateSummaryTable(summaryData) {
+            summaryTableContainer.innerHTML = ''; 
+
+            const createScoreBlock = (score) => {
+                let html = '';
+                const absScore = Math.abs(score);
+                if (absScore === 0) return ''; 
+
+                const colorClass = score > 0 ? 'bg-green-500' : 'bg-red-500';
+                const tooltipText = score > 0 ? `加分 (+${absScore})` : `扣分 (${score})`;
+                
+                for (let i = 0; i < absScore; i++) {
+                    const titleAttribute = (i === 0) ? `title="${tooltipText}"` : '';
+                    html += `<span 
+                                class="inline-block w-3 h-3 rounded-sm mr-0.5 align-middle shadow-sm ${colorClass} transition duration-100 ease-in-out hover:scale-110" 
+                                ${titleAttribute}
+                            ></span>`;
+                }
+                return `<div class="inline-flex mr-2">${html}</div>`; 
+            };
+
+            const generateScoreVisualization = (scores) => {
+                return scores.map(createScoreBlock).join('');
+            };
+
+
+            const table = document.createElement('table');
+            table.className = 'data-table w-full border-collapse rounded-lg shadow-lg overflow-hidden'; 
+
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr>
+                    <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white rounded-tl-lg">座號</th>
+                    <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white">姓名</th>
+                    <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white">加扣分記錄</th> 
+                    <th class="p-3 text-right text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white rounded-tr-lg">總加扣分</th>
+                </tr>
+            `;
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            summaryData.forEach(student => {
+                const tr = document.createElement('tr');
+                const scoreColorClass = student.totalScore > 0 ? 'text-green-600 font-extrabold' : 
+                                        student.totalScore < 0 ? 'text-red-600 font-extrabold' : 
+                                        'text-gray-500 font-medium';
+                
+                const visualizationHtml = generateScoreVisualization(student.scoreEvents);
+
+
+                tr.className = 'border-t border-gray-200 hover:bg-indigo-50 transition duration-150 ease-in-out';
+                tr.innerHTML = `
+                    <td class="p-3 text-sm text-gray-700">${student.seat}</td>
+                    <td class="p-3 text-sm text-gray-700">${student.name}</td>
+                    <td class="p-3 text-sm text-gray-700">
+                        <div class="flex flex-wrap items-center">
+                            ${visualizationHtml}
+                        </div>
+                    </td>
+                    <td class="p-3 text-sm text-right ${scoreColorClass}">${student.totalScore.toFixed(0)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            summaryTableContainer.appendChild(table);
+        }
+        
+        /**
+         * 生成並顯示詳細資料表格 (已修改：隱藏時間戳記，扣分只顯示紅字，不加底色)
+         */
+        function generateDataTable(headers, data, className) {
+            const detailHeader = document.querySelector('#data-display-container h2:nth-of-type(2)');
+            if (detailHeader) {
+                 detailHeader.textContent = `步驟 3: 原始資料列表 (詳細記錄) - ${className}`; 
+            }
+
+            dataTableContainer.innerHTML = ''; // Clear previous table
+
+            const table = document.createElement('table');
+            table.className = 'data-table w-full border-collapse rounded-lg shadow-lg';
+            
+            // --- 建立表頭 (跳過被移除的欄位) ---
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            
+            // 迭代所有標題，跳過指定索引 (COLUMNS_TO_SKIP 包含時間戳記)
+            headers.forEach((headerText, i) => {
+                if (!COLUMNS_TO_SKIP.includes(i)) {
+                    const th = document.createElement('th');
+                    // 讓日期相關的欄位（如果存在）居中，其他靠左
+                    const alignmentClass = (i === DATE_COLUMN_INDEX) ? 'text-center' : 'text-left';
+                    th.className = `p-3 text-sm font-semibold uppercase tracking-wider bg-blue-800 text-white ${alignmentClass}`;
+                    th.textContent = headerText;
+                    headerRow.appendChild(th);
+                }
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // --- 建立表身 (應用紅字邏輯，移除底色) ---
+            const tbody = document.createElement('tbody');
+            data.forEach(rowData => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-t border-gray-200 hover:bg-blue-50 transition duration-150 ease-in-out';
+                
+                // 檢查分數是否為負值
+                const score = parseFloat(rowData[SCORE_COLUMN_INDEX]);
+                const isNegativeScore = !isNaN(score) && score < 0;
+
+                // 迭代所有資料格
+                for (let i = 0; i < rowData.length; i++) {
+                    // 根據 COLUMNS_TO_SKIP 設定跳過欄位 (例如時間戳記)
+                    if (COLUMNS_TO_SKIP.includes(i)) {
+                        continue; 
+                    }
+
+                    const cellData = rowData[i];
+                    const td = document.createElement('td');
+                    // 預設樣式
+                    td.className = 'p-3 text-sm text-gray-700'; 
+                    td.textContent = cellData;
+
+                    if (isNegativeScore) {
+                        // 扣分時，所有可見的文數字內容都變為紅色 (font-bold 讓文字更突出)
+                        td.classList.add('text-red-700', 'font-semibold');
+                        
+                        // 分數欄位給予額外的粗體強調
+                        if (i === SCORE_COLUMN_INDEX) {
+                             td.classList.add('font-extrabold');
+                        }
+                    }
+                    
+                    tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            dataTableContainer.appendChild(table);
+        }
+
+        /**
+         * 執行資料篩選、統計和顯示的主要邏輯
+         */
+        function filterAndDisplayData(selectedClass, startDate, endDate) {
+            dataTableContainer.innerHTML = ''; 
+            summaryTableContainer.innerHTML = ''; 
+            currentSelectedClass = selectedClass;
+
+            if (!selectedClass) {
+                statusMessage.classList.remove('hidden');
+                statusMessage.textContent = '請從上方下拉式選單選擇一個班級以顯示資料。';
+                showFullClassButton.disabled = true;
+                return;
+            }
+
+            statusMessage.classList.add('hidden'); 
+
+            // 將輸入日期轉換為 Date 物件
+            const start = new Date(startDate + 'T00:00:00');
+            const end = new Date(endDate + 'T23:59:59');
+
+            // 篩選出所選班級且在日期範圍內的資料
+            const filteredData = rawData.slice(1).filter(row => {
+                const isClassMatch = row.length > CLASS_COLUMN_INDEX && row[CLASS_COLUMN_INDEX] === selectedClass;
+                
+                if (!isClassMatch) return false;
+
+                const dateString = row[DATE_COLUMN_INDEX];
+                const formattedDate = formatDateToYYYYMMDD(dateString);
+                
+                if (!formattedDate) return false;
+
+                const rowDate = new Date(formattedDate + 'T00:00:00');
+
+                if (isNaN(rowDate.getTime())) return false; 
+                
+                const isDateInRange = rowDate >= start && rowDate <= end;
+
+                return isDateInRange;
+            });
+
+            if (filteredData.length === 0) {
+                 statusMessage.classList.remove('hidden');
+                 statusMessage.textContent = `在 ${startDate} 到 ${endDate} 期間，沒有找到班級 "${selectedClass}" 的資料。`;
+                showFullClassButton.disabled = true;
+                return;
+            }
+
+            // 1. 執行統計計算 (同時取得最大座號)
+            const { summaryArray, maxSeat } = calculateScoreSummary(filteredData);
+            
+            // 儲存結果供全班顯示功能使用
+            currentClassSummary = summaryArray;
+            currentClassMaxSeat = maxSeat;
+            showFullClassButton.disabled = false;
+
+            // 2. 生成統計結果表格 (只顯示有分數的學生)
+            generateSummaryTable(summaryArray);
+
+            // 3. 生成詳細資料表格
+            generateDataTable(headers, filteredData, selectedClass);
+        }
+        
+        /**
+         * 處理篩選按鈕點擊事件或班級切換事件
+         */
+        function handleFilterAction() {
+            const selectedClass = classSelect.value;
+            const startDate = startDateInput.value;
+            const endDate = endDateInput.value;
+
+            if (selectedClass && startDate && endDate) {
+                filterAndDisplayData(selectedClass, startDate, endDate);
+            } else if (selectedClass) {
+                statusMessage.classList.remove('hidden');
+                statusMessage.textContent = '請選擇有效的起始和結束日期。';
+            }
+        }
+        
+        /**
+         * 處理班級選擇事件 (負責應用記住的日期)
+         */
+        function handleClassSelection() {
+            const selectedClass = classSelect.value;
+            
+            if (!selectedClass) {
+                dataTableContainer.innerHTML = ''; 
+                summaryTableContainer.innerHTML = '';
+                statusMessage.classList.remove('hidden');
+                statusMessage.textContent = '請從上方下拉式選單選擇一個班級以顯示資料。';
+                showFullClassButton.disabled = true;
+
+                // 如果沒有記住日期，重設為預設全域日期
+                if (!rememberDatesCheckbox.checked) {
+                    startDateInput.value = defaultMinDate;
+                    endDateInput.value = defaultMaxDate;
+                }
+                return;
+            }
+            
+            // 如果有選擇班級，觸發篩選顯示
+            handleFilterAction();
+        }
+        
+        /**
+         * 顯示通知訊息 (如複製成功)
+         */
+        function showNotification(message) {
+            const notificationBox = document.getElementById('notification-box');
+            notificationBox.textContent = message;
+            notificationBox.classList.remove('hidden', 'opacity-0');
+            notificationBox.classList.add('opacity-100');
+
+            setTimeout(() => {
+                notificationBox.classList.remove('opacity-100');
+                notificationBox.classList.add('opacity-0');
+                setTimeout(() => {
+                    notificationBox.classList.add('hidden');
+                }, 300); // Wait for transition
+            }, 1500);
+        }
+        
+        /**
+         * 複製分數資料到剪貼簿 (用於 Modal)
+         */
+        function copyScoresToClipboard() {
+            // 1. 補齊缺號資料
+            const fullList = fillMissingSeats(currentClassSummary, currentClassMaxSeat);
+            
+            // 2. 準備要複製的文字內容：座號\t分數\n...
+            const scoreData = fullList.map(student => 
+                `${student.seat}\t${student.totalScore.toFixed(0)}`
+            ).join('\n');
+            
+            // 3. 執行複製操作 (使用 document.execCommand('copy') 作為 iframe 環境下的可靠方式)
+            const textarea = document.createElement('textarea');
+            textarea.value = scoreData;
+            textarea.style.position = 'fixed'; 
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showNotification("座號和分數資料已複製到剪貼簿！");
+                } else {
+                    showNotification("複製失敗，請手動複製表格內容。");
+                }
+            } catch (err) {
+                console.error('無法複製到剪貼簿', err);
+                showNotification("複製失敗，請手動複製表格內容。");
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        }
+        
+        /**
+         * 補齊缺號學生 (1 到 maxSeat)，分數為 0
+         */
+        function fillMissingSeats(summaryData, maxSeat) {
+            const dataMap = new Map();
+            summaryData.forEach(student => {
+                const seatNum = parseInt(student.seat, 10);
+                if (!isNaN(seatNum)) {
+                    dataMap.set(seatNum, student);
+                }
+            });
+
+            const fullClassList = [];
+            for (let i = 1; i <= maxSeat; i++) {
+                // 將座號轉換為字串，並在數字小於 10 時補 0，以保持排序一致性
+                const seatStr = String(i).padStart(String(maxSeat).length, '0'); 
+                if (dataMap.has(i)) {
+                    fullClassList.push(dataMap.get(i));
+                } else {
+                    // Missing student (補上缺號，分數 0)
+                    fullClassList.push({
+                        seat: seatStr,
+                        name: '缺號學生', 
+                        totalScore: 0,
+                        scoreEvents: []
+                    });
+                }
+            }
+            return fullClassList;
+        }
+
+        /**
+         * 顯示全班統計模態視窗
+         */
+        function showFullClassModal() {
+            if (!currentSelectedClass || currentClassMaxSeat === 0) {
+                 showNotification("請先選擇一個班級並載入資料。");
+                return;
+            }
+
+            // 1. 補齊缺號資料
+            const fullSummaryData = fillMissingSeats(currentClassSummary, currentClassMaxSeat);
+
+            // 2. 更新標題
+            document.getElementById('modal-title').textContent = `全班統計 (${currentSelectedClass} / 座號 1~${currentClassMaxSeat}) - 補齊缺號`;
+
+            // 3. 生成表格
+            fullClassTableContainer.innerHTML = ''; 
+            const table = document.createElement('table');
+            table.className = 'data-table w-full border-collapse rounded-lg shadow-lg overflow-hidden';
+
+            // 建立表頭 (含複製按鈕)
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr>
+                    <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white rounded-tl-lg w-1/4">座號</th>
+                    <th class="p-3 text-left text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white w-1/4">姓名</th>
+                    <th class="p-3 text-right text-sm font-semibold uppercase tracking-wider bg-indigo-700 text-white rounded-tr-lg w-1/2">
+                        <div class="flex items-center justify-end space-x-2">
+                            <span>總加扣分</span>
+                            <button onclick="copyScoresToClipboard()" class="bg-blue-400 hover:bg-blue-500 text-white text-xs px-2 py-1 rounded-full transition duration-150 ease-in-out shadow-sm focus:outline-none focus:ring-2 focus:ring-300">
+                                複製
+                            </button>
+                        </div>
+                    </th>
+                </tr>
+            `;
+            table.appendChild(thead);
+
+            // 建立表身
+            const tbody = document.createElement('tbody');
+            fullSummaryData.forEach(student => {
+                const tr = document.createElement('tr');
+                const scoreColorClass = student.totalScore > 0 ? 'text-green-600 font-bold' : 
+                                        student.totalScore < 0 ? 'text-red-600 font-bold' : 
+                                        'text-gray-500';
+                const nameText = student.name === '缺號學生' ? 
+                                `<span class="italic text-gray-400">${student.name}</span>` : 
+                                student.name;
+                
+                tr.className = 'border-t border-gray-200 hover:bg-yellow-50 transition duration-150 ease-in-out';
+                tr.innerHTML = `
+                    <td class="p-3 text-sm text-gray-700 font-mono">${student.seat}</td>
+                    <td class="p-3 text-sm text-gray-700">${nameText}</td>
+                    <td class="p-3 text-sm text-right ${scoreColorClass}">${student.totalScore.toFixed(0)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            fullClassTableContainer.appendChild(table);
+
+
+            // 4. 顯示 Modal (新增過渡效果)
+            fullClassModal.classList.remove('hidden');
+            setTimeout(() => {
+                modalContent.classList.remove('scale-95', 'opacity-0');
+                modalContent.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+        
+        /**
+         * 關閉全班統計模態視窗
+         */
+        function closeFullClassModal() {
+            modalContent.classList.remove('scale-100', 'opacity-100');
+            modalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                fullClassModal.classList.add('hidden');
+            }, 300); // Match transition duration
+        }
+
+
+        // 綁定事件監聽器
+        classSelect.addEventListener('change', handleClassSelection);
+        applyFilterButton.addEventListener('click', handleFilterAction);
+        showFullClassButton.addEventListener('click', showFullClassModal);
+        
+        // 網頁載入完成後，開始載入 CSV 資料
+        window.onload = loadCsvData;
+    </script>
+</body>
+</html>
